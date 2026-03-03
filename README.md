@@ -47,13 +47,11 @@ make clean
 ## Controls
 
 - `Right Mouse Button`: drag to look around
-- `W` / `A` / `S` / `D`: move camera
-- `Space`: move up
-- `Left Shift`: move down
-- `I` / `K`: move player forward / backward
-- `J` / `L`: strafe player left / right
-- `U` / `O`: rotate player left / right
-- `T`: jump
+- `Right Mouse Button` while follow camera is active: orbit the camera around the player
+- `W` / `A` / `S` / `D`: move the player while follow camera is active, or move the camera in freecam
+- `Space` / `Left Shift`: move the camera up / down in freecam
+- `Q` / `E`: rotate player left / right
+- `Space`: jump while a player is active
 - `R`: reset player to a test position
 - `F`: leave follow camera and return to freecam
 - `G`: remove the player and automatically restore freecam
@@ -62,8 +60,10 @@ make clean
 ## Player Notes
 
 - `move_player(dx, dy, dz)` moves in local player space, not world space
+- While follow camera is active, player movement is aligned to the current camera orbit
 - Ground boxes currently behave as walkable top surfaces only
 - Follow camera overrides the free camera update while it is enabled
+- Right mouse drag still works in follow camera mode and adjusts orbit yaw/pitch
 
 ## Player And Camera API
 
@@ -82,6 +82,8 @@ make clean
 - `set_player_move_speed(...)`: control movement speed scaling
 - `set_follow_camera_enabled(...)`: toggle follow camera mode
 - `set_follow_camera_offset(...)`: control follow camera distance and height
+- `set_camlock_player_movement(...)`: toggle whether right-click camera rotation also rotates the player
+- `get_camlock_player_movement()`: read the current camlock toggle state
 - `go_back_to_freecam_from_player()`: keep the current player-relative view, then hand control back to freecam
 - `clear_ground_colliders()` / `add_ground_box(...)`: define simple walkable support surfaces
 
@@ -102,6 +104,7 @@ e.clear_ground_colliders();
 e.add_ground_box(0.f, -0.5f, 0.f, 20.f, 0.5f, 20.f);
 
 e.create_player(0.f, 0.45f, 0.f, 0.f, 1.f, 0.f);
+e.set_camlock_player_movement(true);
 e.set_follow_camera_enabled(true);
 
 e.remove_player();                 // Returns control to freecam and keeps the remembered spawn

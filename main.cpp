@@ -17,9 +17,11 @@ int main()
 
     // Spawn the player, aim it slightly to the right, then enable follow camera.
     e.create_player(2.f, 0.45f, 4.f, 0.f, 1.f, 0.f);
+    Engine::PlayerInfo player = e.get_player();
     e.set_player_rotation(0.35f);
     e.set_player_move_speed(kPlayerBaseSpeed);
     e.set_follow_camera_offset(7.f, 3.f);
+    e.set_camlock_player_movement(true);
     e.set_follow_camera_enabled(true);
 
     float a = 0.f;
@@ -34,21 +36,19 @@ int main()
         e.poll_events();
         e.update_freecam(dt);
 
-        // IJKL moves in local player space so movement follows the facing direction.
-        if (e.is_pressed_key(aqwengine::InputKeys::I_KEY))
+        // WASD moves the player; in follow camera mode movement is camera-relative.
+        if (e.is_pressed_key(aqwengine::InputKeys::W_KEY))
             e.move_player(0.f, 0.f, playerStep);
-        if (e.is_pressed_key(aqwengine::InputKeys::K_KEY))
+        if (e.is_pressed_key(aqwengine::InputKeys::S_KEY))
             e.move_player(0.f, 0.f, -playerStep);
-        if (e.is_pressed_key(aqwengine::InputKeys::J_KEY))
+        if (e.is_pressed_key(aqwengine::InputKeys::A_KEY))
             e.move_player(-playerStep, 0.f, 0.f);
-        if (e.is_pressed_key(aqwengine::InputKeys::L_KEY))
+        if (e.is_pressed_key(aqwengine::InputKeys::D_KEY))
             e.move_player(playerStep, 0.f, 0.f);
-        if (e.is_pressed_key(aqwengine::InputKeys::U_KEY))
+        if (e.is_pressed_key(aqwengine::InputKeys::Q_KEY))
             e.rotate_player(-playerTurn);
-        if (e.is_pressed_key(aqwengine::InputKeys::O_KEY))
+        if (e.is_pressed_key(aqwengine::InputKeys::E_KEY))
             e.rotate_player(playerTurn);
-        if (e.is_pressed_key(aqwengine::InputKeys::T_KEY))
-            e.jump_player();
         if (e.is_pressed_key(aqwengine::InputKeys::R_KEY))
             e.set_player_position(2.f, 3.f, 4.f);
         if (e.is_pressed_key(aqwengine::InputKeys::F_KEY))
@@ -57,8 +57,10 @@ int main()
             e.remove_player();
         if (e.is_pressed_key(aqwengine::InputKeys::H_KEY))
             e.spawn_player();
-        if (e.is_pressed_key(aqwengine::InputKeys::B_KEY))
-            e.spawn_player();
+        if (e.is_pressed_key(aqwengine::InputKeys::SPACE))
+            e.jump_player();
+
+        player = e.get_player();
 
         // Reduce air control slightly so the grounded accessor has an obvious use in the sample.
         if (e.get_player_grounded())
@@ -67,6 +69,7 @@ int main()
             e.set_player_move_speed(kPlayerBaseSpeed * 0.8f);
 
         e.update_player(dt);
+        e.set_to_first_person(true, true);
 
         e.clear_screen();
         e.draw_grid3d(30.f, 1.f);

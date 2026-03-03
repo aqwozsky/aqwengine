@@ -147,6 +147,64 @@ namespace
             return sf::Keyboard::Y;
         case aqwengine::InputKeys::Z_KEY:
             return sf::Keyboard::Z;
+        case aqwengine::InputKeys::SPACE:
+            return sf::Keyboard::Space;
+        case aqwengine::InputKeys::ENTER:
+            return sf::Keyboard::Enter;
+        case aqwengine::InputKeys::ESCAPE:
+            return sf::Keyboard::Escape;
+        case aqwengine::InputKeys::BACKSPACE:
+            return sf::Keyboard::Backspace;
+        case aqwengine::InputKeys::TAB:
+            return sf::Keyboard::Tab;
+        case aqwengine::InputKeys::LEFT_SHIFT:
+            return sf::Keyboard::LShift;
+        case aqwengine::InputKeys::RIGHT_SHIFT:
+            return sf::Keyboard::RShift;
+        case aqwengine::InputKeys::LEFT_CONTROL:
+            return sf::Keyboard::LControl;
+        case aqwengine::InputKeys::RIGHT_CONTROL:
+            return sf::Keyboard::RControl;
+        case aqwengine::InputKeys::LEFT_ALT:
+            return sf::Keyboard::LAlt;
+        case aqwengine::InputKeys::RIGHT_ALT:
+            return sf::Keyboard::RAlt;
+        case aqwengine::InputKeys::F1:
+            return sf::Keyboard::F1;
+        case aqwengine::InputKeys::F2:
+            return sf::Keyboard::F2;
+        case aqwengine::InputKeys::F3:
+            return sf::Keyboard::F3;
+        case aqwengine::InputKeys::F4:
+            return sf::Keyboard::F4;
+        case aqwengine::InputKeys::F5:
+            return sf::Keyboard::F5;
+        case aqwengine::InputKeys::F6:
+            return sf::Keyboard::F6;
+        case aqwengine::InputKeys::F7:
+            return sf::Keyboard::F7;
+        case aqwengine::InputKeys::F8:
+            return sf::Keyboard::F8;
+        case aqwengine::InputKeys::F9:
+            return sf::Keyboard::F9;
+        case aqwengine::InputKeys::F10:
+            return sf::Keyboard::F10;
+        case aqwengine::InputKeys::F11:
+            return sf::Keyboard::F11;
+        case aqwengine::InputKeys::F12:
+            return sf::Keyboard::F12;
+        case aqwengine::InputKeys::INSERT:
+            return sf::Keyboard::Insert;
+        case aqwengine::InputKeys::DELETE:
+            return sf::Keyboard::Delete;
+        case aqwengine::InputKeys::HOME:
+            return sf::Keyboard::Home;
+        case aqwengine::InputKeys::END:
+            return sf::Keyboard::End;
+        case aqwengine::InputKeys::PAGE_UP:
+            return sf::Keyboard::PageUp;
+        case aqwengine::InputKeys::PAGE_DOWN:
+            return sf::Keyboard::PageDown;
         default:
             return sf::Keyboard::Unknown;
         }
@@ -308,21 +366,32 @@ float Engine::get_player_support_y(float x, float z) const
     return supportY;
 }
 
+void Engine::lock_cursor_to_center(bool enabled)
+{
+    if (enabled)
+        window.setMouseCursorVisible(false);
+    else
+        window.setMouseCursorVisible(true);
+}
+
 void Engine::update_follow_camera()
 {
     if (!followCam.enabled || !player.active)
         return;
 
-    // Keep the camera behind the player and slightly above eye level.
-    Vec3 forward = yaw_forward(player.yaw);
+    // Keep the camera behind the player while allowing mouse-driven orbit around the player.
+    float orbitYaw = player.yaw + followCam.yawOffset;
+    Vec3 forward = yaw_forward(orbitYaw);
     Vec3 cameraTarget = player.position + normalize(player.normal) * (player.radius * 0.75f);
     Vec3 cameraPos = cameraTarget - forward * followCam.distance + Vec3{0.f, followCam.height, 0.f};
 
     cam.x = cameraPos.x;
     cam.y = cameraPos.y;
     cam.z = cameraPos.z;
-    cam.yaw = player.yaw;
-    cam.pitch = 0.35f;
+    cam.yaw = orbitYaw;
+    cam.pitch = followCam.pitch;
+
+    // Lock the mouse cursor to the center of the screen.
 }
 
 void Engine::draw_cube_wire(float cx, float cy, float cz, float size, float angleY)
@@ -567,14 +636,15 @@ void Engine::go_back_to_freecam_from_player()
 {
     if (player.active)
     {
-        Vec3 forward = yaw_forward(player.yaw);
+        float orbitYaw = player.yaw + followCam.yawOffset;
+        Vec3 forward = yaw_forward(orbitYaw);
         Vec3 freecamPos = player.position - forward * followCam.distance + Vec3{0.f, followCam.height, 0.f};
 
         cam.x = freecamPos.x;
         cam.y = freecamPos.y;
         cam.z = freecamPos.z;
-        cam.yaw = player.yaw;
-        cam.pitch = 0.35f;
+        cam.yaw = orbitYaw;
+        cam.pitch = followCam.pitch;
     }
 
     followCam.enabled = false;
@@ -587,9 +657,21 @@ void Engine::move_player(float dx, float dy, float dz)
         return;
 
     // Movement is in local player space: X = strafe, Z = forward/back.
+    // In follow camera mode, movement is interpreted relative to the current camera orbit.
+    float movementYaw = followCam.enabled ? (player.yaw + followCam.yawOffset) : player.yaw;
+    if (followCam.enabled && (std::abs(dx) > 0.0001f || std::abs(dz) > 0.0001f))
+    {
+        player.yaw = movementYaw;
+        followCam.yawOffset = 0.f;
+    }
+
+    if (followCam.enabled && movementYaw != cam.yaw)
+    {
+        this->move_player(cam.yaw - movementYaw, 0.f, 0.f);
+    }
     // The incoming values are treated as intent scaled by frame time, then expanded by moveSpeed.
-    Vec3 right = yaw_right(player.yaw);
-    Vec3 forward = yaw_forward(player.yaw);
+    Vec3 right = yaw_right(movementYaw);
+    Vec3 forward = yaw_forward(movementYaw);
     Vec3 planarMove = (right * dx + forward * dz) * player.moveSpeed;
 
     player.position.x += planarMove.x;
@@ -670,6 +752,20 @@ Vec3 Engine::get_player_position() const
     return player.position;
 }
 
+Engine::PlayerInfo Engine::get_player() const
+{
+    return {
+        player.active,
+        player.position,
+        player.normal,
+        player.velocity,
+        player.radius,
+        player.yaw,
+        player.moveSpeed,
+        player.grounded,
+    };
+}
+
 bool Engine::get_player_grounded() const
 {
     return player.grounded;
@@ -694,6 +790,23 @@ void Engine::set_follow_camera_offset(float distance, float height)
     update_follow_camera();
 }
 
+void Engine::set_camlock_player_movement(bool enabled)
+{
+    camlockPlayerMovement = enabled;
+
+    if (enabled && player.active && followCam.enabled)
+    {
+        player.yaw += followCam.yawOffset;
+        followCam.yawOffset = 0.f;
+        update_follow_camera();
+    }
+}
+
+bool Engine::get_camlock_player_movement() const
+{
+    return camlockPlayerMovement;
+}
+
 void Engine::clear_ground_colliders()
 {
     groundBoxes.clear();
@@ -709,6 +822,43 @@ void Engine::update_freecam(float dt, float moveSpeed, float mouseSens)
 {
     if (followCam.enabled && player.active)
     {
+        bool wantsMouseLook = sf::Mouse::isButtonPressed(sf::Mouse::Right);
+        if (wantsMouseLook != cam.mouseLocked)
+        {
+            cam.mouseLocked = wantsMouseLook;
+            window.setMouseCursorVisible(true);
+            window.setMouseCursorGrabbed(false);
+
+            auto p = sf::Mouse::getPosition(window);
+            cam.lastMouseX = p.x;
+            cam.lastMouseY = p.y;
+        }
+
+        if (cam.mouseLocked)
+        {
+            auto p = sf::Mouse::getPosition(window);
+            int dx = p.x - cam.lastMouseX;
+            int dy = p.y - cam.lastMouseY;
+
+            dx = std::clamp(dx, -40, 40);
+            dy = std::clamp(dy, -40, 40);
+
+            if (camlockPlayerMovement)
+                player.yaw -= dx * mouseSens;
+            else
+                followCam.yawOffset -= dx * mouseSens;
+            followCam.pitch += dy * mouseSens;
+
+            const float limit = 1.2f;
+            if (followCam.pitch > limit)
+                followCam.pitch = limit;
+            if (followCam.pitch < -0.7f)
+                followCam.pitch = -0.7f;
+
+            cam.lastMouseX = p.x;
+            cam.lastMouseY = p.y;
+        }
+
         update_follow_camera();
         return;
     }
@@ -840,4 +990,27 @@ void Engine::draw_debug_overlay()
     text.setString(textStream.str());
 
     window.draw(text);
+}
+
+void Engine::set_to_first_person(bool enabled, bool lockMouse)
+{
+    if (!enabled && !player.active)
+        return;
+    else if (player.active && !lockMouse)
+    {
+        cam.y = player.position.y;
+        cam.x = player.position.x;
+        cam.z = player.position.z;
+        cam.yaw = player.yaw;
+        cam.pitch = 0.f;
+    }
+    else if (player.active && lockMouse)
+    {
+        cam.y = player.position.y;
+        cam.x = player.position.x;
+        cam.z = player.position.z;
+        cam.yaw = player.yaw;
+        cam.pitch = 0.f;
+        this->lock_cursor_to_center(true);
+    }
 }

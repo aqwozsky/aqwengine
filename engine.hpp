@@ -66,6 +66,8 @@ namespace aqwengine
         HOME,
         END,
         INSERT,
+        SPACE,
+        TAB,
 
         F1,
         F2,
@@ -92,6 +94,18 @@ namespace aqwengine
 class Engine
 {
 public:
+    struct PlayerInfo
+    {
+        bool active = false;
+        Vec3 position{0.f, 0.f, 0.f};
+        Vec3 normal{0.f, 1.f, 0.f};
+        Vec3 velocity{0.f, 0.f, 0.f};
+        float radius = 0.f;
+        float yaw = 0.f;
+        float moveSpeed = 0.f;
+        bool grounded = false;
+    };
+
     void create_window(int w, int h, const std::string &title, bool vsync_enabled, int fps_limit);
     void clear_screen();
     void update_screen();
@@ -125,13 +139,18 @@ public:
     void set_player_rotation(float yaw);
     float get_player_rotation() const;
     Vec3 get_player_position() const;
+    PlayerInfo get_player() const;
     bool get_player_grounded() const;
     void set_player_move_speed(float speed);
     void set_follow_camera_enabled(bool enabled);
     void set_follow_camera_offset(float distance, float height);
+    void set_camlock_player_movement(bool enabled);
+    bool get_camlock_player_movement() const;
     void clear_ground_colliders();
     void add_ground_box(float cx, float cy, float cz, float halfX, float halfY, float halfZ);
     void go_back_to_freecam_from_player();
+    void set_to_first_person(bool enabled, bool lockMouse);
+    void lock_cursor_to_center(bool enabled);
 
 private:
     sf::RenderWindow window;
@@ -176,7 +195,11 @@ private:
         bool enabled = false;
         float distance = 6.f;
         float height = 2.5f;
+        float yawOffset = 0.f;
+        float pitch = 0.35f;
     } followCam;
+
+    bool camlockPlayerMovement = false;
 
     struct GroundBox
     {
