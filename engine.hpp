@@ -2,6 +2,7 @@
 #include <SFML/Graphics.hpp>
 #include "math3d.hpp"
 #include <string>
+#include <vector>
 
 namespace aqwengine
 {
@@ -110,6 +111,27 @@ public:
     void set_freecam_enabled(bool enabled);
     void update_freecam(float dt, float moveSpeed = 60.0f, float mouseSens = 0.01f);
     void set_debug_coords_enabled(bool enabled);
+    void draw_a_ball(float x, float y, float z, float nx, float ny, float nz, float radius, sf::Color c = sf::Color::White);
+    void create_player(float x, float y, float z, float nx, float ny, float nz);
+    void spawn_player();
+    void spawn_player(float x, float y, float z, float nx, float ny, float nz);
+    void add_player(float x, float y, float z, float nx, float ny, float nz); // Backward-compatible alias
+    void remove_player(bool keepLastSpawn = true);
+    void set_player_position(float x, float y, float z);
+    void move_player(float dx, float dy, float dz);
+    void rotate_player(float deltaYaw);
+    void jump_player(float impulse = 6.0f);
+    void update_player(float dt);
+    void set_player_rotation(float yaw);
+    float get_player_rotation() const;
+    Vec3 get_player_position() const;
+    bool get_player_grounded() const;
+    void set_player_move_speed(float speed);
+    void set_follow_camera_enabled(bool enabled);
+    void set_follow_camera_offset(float distance, float height);
+    void clear_ground_colliders();
+    void add_ground_box(float cx, float cy, float cz, float halfX, float halfY, float halfZ);
+    void go_back_to_freecam_from_player();
 
 private:
     sf::RenderWindow window;
@@ -127,6 +149,45 @@ private:
     sf::Font debugFont;
     bool debugFontLoaded = false;
 
-    Vec3 to_view(Vec3 world) const; // private helper
+    struct PlayerState
+    {
+        bool active = false;
+        Vec3 position{0.f, 0.f, 0.f};
+        Vec3 normal{0.f, 1.f, 0.f};
+        Vec3 velocity{0.f, 0.f, 0.f};
+        float radius = 0.45f;
+        float yaw = 0.f;
+        float moveSpeed = 4.0f;
+        float gravity = 16.0f;
+        float groundY = 0.f;
+        bool grounded = false;
+        sf::Color color = sf::Color(255, 220, 120);
+    } player;
+
+    struct PlayerSpawnState
+    {
+        bool hasSpawn = false;
+        Vec3 position{0.f, 0.f, 0.f};
+        Vec3 normal{0.f, 1.f, 0.f};
+    } lastPlayerSpawn;
+
+    struct FollowCameraState
+    {
+        bool enabled = false;
+        float distance = 6.f;
+        float height = 2.5f;
+    } followCam;
+
+    struct GroundBox
+    {
+        Vec3 center{0.f, 0.f, 0.f};
+        Vec3 halfSize{0.f, 0.f, 0.f};
+    };
+
+    std::vector<GroundBox> groundBoxes;
+
+    Vec3 to_view(Vec3 world) const;
+    float get_player_support_y(float x, float z) const;
+    void update_follow_camera();
     void draw_debug_overlay();
 };

@@ -5,10 +5,11 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 using namespace std;
 
-// ENGINE 3D
+// 3D math and projection helpers used by the debug renderer.
 namespace
 {
     constexpr float kNearPlane = 1.0f;
@@ -75,9 +76,19 @@ namespace
 
         return false;
     }
+
+    static Vec3 yaw_forward(float yaw)
+    {
+        return {-std::sin(yaw), 0.f, std::cos(yaw)};
+    }
+
+    static Vec3 yaw_right(float yaw)
+    {
+        return {std::cos(yaw), 0.f, std::sin(yaw)};
+    }
 }
 
-// ENGINE KEYS
+// Input mapping helpers that keep SFML details out of the public API.
 namespace
 {
     sf::Keyboard::Key to_sf_key(aqwengine::InputKeys key)
@@ -157,7 +168,7 @@ namespace
     }
 }
 
-// Engine functions
+// Core window and rendering functions.
 void Engine::create_window(int w, int h, const std::string &title, bool vsync_enabled, int fps_limit)
 {
     window.create(sf::VideoMode(w, h), title);
@@ -165,13 +176,15 @@ void Engine::create_window(int w, int h, const std::string &title, bool vsync_en
     {
         window.setVerticalSyncEnabled(true);
         fps_limit == 0 ? window.setFramerateLimit(60) : window.setFramerateLimit(fps_limit);
-        cout << "[AQWENGINE] Framerate limit: " << fps_limit << " |" << "vsnyc is " << vsync_enabled << endl;
+        cout << "[AQWENGINE] Framerate limit: " << fps_limit << " |"
+             << "vsync is " << vsync_enabled << endl;
     }
     else
     {
         window.setVerticalSyncEnabled(false);
         fps_limit == 0 ? window.setFramerateLimit(0) : window.setFramerateLimit(fps_limit);
-        cout << "[AQWENGINE] Framerate limit: " << fps_limit << " |" << "vsnyc is " << vsync_enabled << endl;
+        cout << "[AQWENGINE] Framerate limit: " << fps_limit << " |"
+             << "vsync is " << vsync_enabled << endl;
     }
 
     set_freecam_enabled(cam.enabled);
@@ -184,6 +197,22 @@ void Engine::clear_screen()
 
 void Engine::update_screen()
 {
+    if (player.active)
+    {
+        draw_a_ball(player.position.x, player.position.y, player.position.z,
+                    player.normal.x, player.normal.y, player.normal.z,
+                    player.radius, player.color);
+
+        Vec3 head = player.position + normalize(player.normal) * (player.radius * 1.8f);
+        Vec3 facing = player.position + yaw_forward(player.yaw) * (player.radius * 1.8f);
+        draw_line3d(player.position.x, player.position.y, player.position.z,
+                    head.x, head.y, head.z,
+                    sf::Color::Cyan);
+        draw_line3d(player.position.x, player.position.y, player.position.z,
+                    facing.x, facing.y, facing.z,
+                    sf::Color::Green);
+    }
+
     draw_debug_overlay();
     window.display();
 }
@@ -246,14 +275,54 @@ void Engine::draw_line3d(float ax, float ay, float az,
 
 Vec3 Engine::to_view(Vec3 world) const
 {
-    // world - camPos
+    // Translate into camera space.
     Vec3 p{world.x - cam.x, world.y - cam.y, world.z - cam.z};
 
-    // inverse camera rotation
+    // Apply the inverse camera rotation so the world is viewed from the camera.
     p = rotateY(p, -cam.yaw);
     p = rotateX(p, -cam.pitch);
 
     return p;
+}
+
+float Engine::get_player_support_y(float x, float z) const
+{
+    // Return the highest platform top under the player's X/Z position.
+    float supportY = 0.f;
+
+    for (const GroundBox &box : groundBoxes)
+    {
+        float minX = box.center.x - box.halfSize.x;
+        float maxX = box.center.x + box.halfSize.x;
+        float minZ = box.center.z - box.halfSize.z;
+        float maxZ = box.center.z + box.halfSize.z;
+
+        if (x < minX || x > maxX || z < minZ || z > maxZ)
+            continue;
+
+        float topY = box.center.y + box.halfSize.y;
+        if (topY > supportY)
+            supportY = topY;
+    }
+
+    return supportY;
+}
+
+void Engine::update_follow_camera()
+{
+    if (!followCam.enabled || !player.active)
+        return;
+
+    // Keep the camera behind the player and slightly above eye level.
+    Vec3 forward = yaw_forward(player.yaw);
+    Vec3 cameraTarget = player.position + normalize(player.normal) * (player.radius * 0.75f);
+    Vec3 cameraPos = cameraTarget - forward * followCam.distance + Vec3{0.f, followCam.height, 0.f};
+
+    cam.x = cameraPos.x;
+    cam.y = cameraPos.y;
+    cam.z = cameraPos.z;
+    cam.yaw = player.yaw;
+    cam.pitch = 0.35f;
 }
 
 void Engine::draw_cube_wire(float cx, float cy, float cz, float size, float angleY)
@@ -269,7 +338,7 @@ void Engine::draw_cube_wire(float cx, float cy, float cz, float size, float angl
         {cx - size, cy + size, cz + size},
     };
 
-    // rotasyon + kamera uzaklığı
+    // Rotate the cube in world space before projection.
     for (auto &p : pts)
     {
         p = rotateY(p, angleY);
@@ -302,6 +371,65 @@ void Engine::draw_cube_wire(float cx, float cy, float cz, float size, float angl
     window.draw(lines);
 }
 
+void Engine::draw_a_ball(float x, float y, float z, float nx, float ny, float nz, float radius, sf::Color c)
+{
+    if (radius <= 0.f)
+        return;
+
+    constexpr float kPi = 3.14159265359f;
+    constexpr int kSectors = 36;
+    constexpr int kStacks = 18;
+
+    Vec3 center{x, y, z};
+
+    // Build a local basis so the sphere can be aligned to the supplied normal.
+    Vec3 normal = (std::abs(nx) < 0.0001f && std::abs(ny) < 0.0001f && std::abs(nz) < 0.0001f)
+                      ? Vec3{0.f, 1.f, 0.f}
+                      : normalize({nx, ny, nz});
+    Vec3 helper = std::abs(normal.y) > 0.99f ? Vec3{1.f, 0.f, 0.f} : Vec3{0.f, 1.f, 0.f};
+    Vec3 tangent = normalize(cross(helper, normal));
+    Vec3 bitangent = cross(normal, tangent);
+
+    auto sphere_point = [&](float phi, float theta) -> Vec3
+    {
+        float sinPhi = std::sin(phi);
+        float localX = radius * sinPhi * std::cos(theta);
+        float localY = radius * sinPhi * std::sin(theta);
+        float localZ = radius * std::cos(phi);
+        return center + tangent * localX + bitangent * localY + normal * localZ;
+    };
+
+    std::vector<Vec3> previousRing(kSectors + 1);
+
+    for (int stack = 0; stack <= kStacks; ++stack)
+    {
+        float phi = kPi * static_cast<float>(stack) / static_cast<float>(kStacks);
+        std::vector<Vec3> currentRing(kSectors + 1);
+
+        for (int sector = 0; sector <= kSectors; ++sector)
+        {
+            float theta = 2.f * kPi * static_cast<float>(sector) / static_cast<float>(kSectors);
+            currentRing[sector] = sphere_point(phi, theta);
+
+            if (sector > 0)
+            {
+                const Vec3 &a = currentRing[sector - 1];
+                const Vec3 &b = currentRing[sector];
+                draw_line3d(a.x, a.y, a.z, b.x, b.y, b.z, c);
+            }
+
+            if (stack > 0)
+            {
+                const Vec3 &a = previousRing[sector];
+                const Vec3 &b = currentRing[sector];
+                draw_line3d(a.x, a.y, a.z, b.x, b.y, b.z, c);
+            }
+        }
+
+        previousRing = currentRing;
+    }
+}
+
 void Engine::draw_grid3d(float size, float step)
 {
     int w = (int)window.getSize().x;
@@ -311,7 +439,7 @@ void Engine::draw_grid3d(float size, float step)
 
     for (float i = -size; i <= size; i += step)
     {
-        // Z sabit, X değişiyor
+        // Constant Z, varying X.
         Vec3 a = to_view({-size, 0.f, i});
         Vec3 b = to_view({size, 0.f, i});
         if (clip_to_near_plane(a, b))
@@ -322,7 +450,7 @@ void Engine::draw_grid3d(float size, float step)
             lines.append(sf::Vertex(pb, sf::Color(80, 80, 80)));
         }
 
-        // X sabit, Z değişiyor
+        // Constant X, varying Z.
         Vec3 c = to_view({i, 0.f, -size});
         Vec3 d = to_view({i, 0.f, size});
         if (clip_to_near_plane(c, d))
@@ -337,7 +465,7 @@ void Engine::draw_grid3d(float size, float step)
     window.draw(lines);
 }
 
-// Camera functions
+// Camera and player control functions.
 void Engine::set_freecam_enabled(bool enabled)
 {
     cam.enabled = enabled;
@@ -351,8 +479,240 @@ void Engine::set_freecam_enabled(bool enabled)
     cam.lastMouseY = p.y;
 }
 
+void Engine::create_player(float x, float y, float z, float nx, float ny, float nz)
+{
+    player.active = true;
+    player.position = {x, y, z};
+    player.velocity = {0.f, 0.f, 0.f};
+    player.yaw = 0.f;
+
+    // A zero normal means "use world up".
+    if (std::abs(nx) < 0.0001f && std::abs(ny) < 0.0001f && std::abs(nz) < 0.0001f)
+        player.normal = {0.f, 1.f, 0.f};
+    else
+        player.normal = normalize({nx, ny, nz});
+
+    lastPlayerSpawn.hasSpawn = true;
+    lastPlayerSpawn.position = {x, y, z};
+    lastPlayerSpawn.normal = player.normal;
+
+    // Spawn the player on top of the supporting surface if needed.
+    float minY = get_player_support_y(player.position.x, player.position.z) + player.radius;
+    if (player.position.y <= minY)
+    {
+        player.position.y = minY;
+        player.grounded = true;
+    }
+    else
+    {
+        player.grounded = false;
+    }
+
+    update_follow_camera();
+}
+
+void Engine::spawn_player()
+{
+    if (!lastPlayerSpawn.hasSpawn)
+        return;
+
+    spawn_player(lastPlayerSpawn.position.x, lastPlayerSpawn.position.y, lastPlayerSpawn.position.z,
+                 lastPlayerSpawn.normal.x, lastPlayerSpawn.normal.y, lastPlayerSpawn.normal.z);
+}
+
+void Engine::spawn_player(float x, float y, float z, float nx, float ny, float nz)
+{
+    create_player(x, y, z, nx, ny, nz);
+    set_follow_camera_enabled(true);
+}
+
+void Engine::add_player(float x, float y, float z, float nx, float ny, float nz)
+{
+    create_player(x, y, z, nx, ny, nz);
+}
+
+void Engine::remove_player(bool keepLastSpawn)
+{
+    go_back_to_freecam_from_player();
+    if (!keepLastSpawn)
+        lastPlayerSpawn.hasSpawn = false;
+    player.active = false;
+    player.velocity = {0.f, 0.f, 0.f};
+    player.grounded = false;
+}
+
+void Engine::set_player_position(float x, float y, float z)
+{
+    if (!player.active)
+        return;
+
+    player.position = {x, y, z};
+
+    float minY = get_player_support_y(player.position.x, player.position.z) + player.radius;
+    if (player.position.y <= minY)
+    {
+        player.position.y = minY;
+        player.velocity.y = 0.f;
+        player.grounded = true;
+    }
+    else
+    {
+        player.grounded = false;
+    }
+
+    update_follow_camera();
+}
+
+void Engine::go_back_to_freecam_from_player()
+{
+    if (player.active)
+    {
+        Vec3 forward = yaw_forward(player.yaw);
+        Vec3 freecamPos = player.position - forward * followCam.distance + Vec3{0.f, followCam.height, 0.f};
+
+        cam.x = freecamPos.x;
+        cam.y = freecamPos.y;
+        cam.z = freecamPos.z;
+        cam.yaw = player.yaw;
+        cam.pitch = 0.35f;
+    }
+
+    followCam.enabled = false;
+    set_freecam_enabled(true);
+}
+
+void Engine::move_player(float dx, float dy, float dz)
+{
+    if (!player.active)
+        return;
+
+    // Movement is in local player space: X = strafe, Z = forward/back.
+    // The incoming values are treated as intent scaled by frame time, then expanded by moveSpeed.
+    Vec3 right = yaw_right(player.yaw);
+    Vec3 forward = yaw_forward(player.yaw);
+    Vec3 planarMove = (right * dx + forward * dz) * player.moveSpeed;
+
+    player.position.x += planarMove.x;
+    player.position.z += planarMove.z;
+    player.position.y += dy * player.moveSpeed;
+
+    // While grounded, keep the player snapped to the support surface.
+    if (player.grounded)
+    {
+        float minY = get_player_support_y(player.position.x, player.position.z) + player.radius;
+        player.position.y = std::max(player.position.y, minY);
+    }
+
+    update_follow_camera();
+}
+
+void Engine::rotate_player(float deltaYaw)
+{
+    if (!player.active)
+        return;
+
+    player.yaw += deltaYaw;
+    update_follow_camera();
+}
+
+void Engine::jump_player(float impulse)
+{
+    if (!player.active || !player.grounded)
+        return;
+
+    player.velocity.y = impulse;
+    player.grounded = false;
+}
+
+void Engine::update_player(float dt)
+{
+    if (!player.active)
+        return;
+
+    if (dt > 0.05f)
+        dt = 0.05f;
+
+    // Basic vertical physics: gravity pulls down, then the player lands on the top-most platform.
+    player.velocity.y -= player.gravity * dt;
+    player.position.y += player.velocity.y * dt;
+
+    float minY = get_player_support_y(player.position.x, player.position.z) + player.radius;
+    if (player.position.y <= minY)
+    {
+        player.position.y = minY;
+        player.velocity.y = 0.f;
+        player.grounded = true;
+    }
+    else
+    {
+        player.grounded = false;
+    }
+
+    update_follow_camera();
+}
+
+void Engine::set_player_rotation(float yaw)
+{
+    if (!player.active)
+        return;
+
+    player.yaw = yaw;
+    update_follow_camera();
+}
+
+float Engine::get_player_rotation() const
+{
+    return player.yaw;
+}
+
+Vec3 Engine::get_player_position() const
+{
+    return player.position;
+}
+
+bool Engine::get_player_grounded() const
+{
+    return player.grounded;
+}
+
+void Engine::set_player_move_speed(float speed)
+{
+    player.moveSpeed = std::max(0.f, speed);
+}
+
+void Engine::set_follow_camera_enabled(bool enabled)
+{
+    followCam.enabled = enabled;
+    if (enabled)
+        update_follow_camera();
+}
+
+void Engine::set_follow_camera_offset(float distance, float height)
+{
+    followCam.distance = distance;
+    followCam.height = height;
+    update_follow_camera();
+}
+
+void Engine::clear_ground_colliders()
+{
+    groundBoxes.clear();
+}
+
+void Engine::add_ground_box(float cx, float cy, float cz, float halfX, float halfY, float halfZ)
+{
+    // Ground boxes currently act as "walkable top surfaces" for the player.
+    groundBoxes.push_back({{cx, cy, cz}, {std::abs(halfX), std::abs(halfY), std::abs(halfZ)}});
+}
+
 void Engine::update_freecam(float dt, float moveSpeed, float mouseSens)
 {
+    if (followCam.enabled && player.active)
+    {
+        update_follow_camera();
+        return;
+    }
+
     if (!cam.enabled)
         return;
 
@@ -449,9 +809,26 @@ void Engine::draw_debug_overlay()
 
     std::ostringstream textStream;
     textStream << std::fixed << std::setprecision(2)
+               << "Camera: " << ((followCam.enabled && player.active) ? "followcam" : "freecam") << '\n'
                << "X: " << cam.x << '\n'
                << "Y: " << cam.y << '\n'
                << "Z: " << cam.z;
+
+    if (player.active)
+    {
+        textStream << '\n'
+                   << "PX: " << player.position.x << '\n'
+                   << "PY: " << player.position.y << '\n'
+                   << "PZ: " << player.position.z << '\n'
+                   << "Yaw: " << player.yaw << '\n'
+                   << "MoveSpeed: " << player.moveSpeed << '\n'
+                   << "Grounded: " << (player.grounded ? "true" : "false");
+    }
+    else
+    {
+        textStream << '\n'
+                   << "Player: inactive";
+    }
 
     sf::Text text;
     text.setFont(debugFont);
